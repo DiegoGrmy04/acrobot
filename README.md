@@ -92,4 +92,4 @@ projet2/
 
 
 pip install gymnasium pygame
-pip install "stable-baselines3[extra]" tensorboard
+pip install "stable-baselines3[extra]" tensorboard# acrobot
