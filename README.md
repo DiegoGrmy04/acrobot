@@ -85,11 +85,12 @@ projet2/
 │   ├── dqn_kaggle.py   # Script ayant échoué (Preuve empirique n°1)
 │   └── ppo_kaggle.py   # Script victorieux (Preuve empirique n°2)
 
-
+```
 ---
 
-## 5. Architecture du Projet
+## 6. Architecture du Projet
 
-
+```text
 pip install gymnasium pygame
 pip install "stable-baselines3[extra]" tensorboard# acrobot
+```
