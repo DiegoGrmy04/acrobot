@@ -1,13 +1,11 @@
-"""PPO + Potential-Based Reward Shaping on the Triple Acrobot — Kaggle GPU notebook.
+"""PPO on the Triple Acrobot, naive reward shaping — Kaggle GPU notebook.
 
 Self-contained: paste in a Kaggle notebook, set Accelerator = GPU T4 x2,
 choose Internet = ON and Persistence = Files only, then Save & Run All.
 
-Reference: Ng, Harada & Russell (1999), "Policy Invariance Under Reward
-Transformations", ICML. Theorem: if F(s, a, s') = gamma * Phi(s') - Phi(s),
-the optimal policy is invariant w.r.t. the original MDP.
-
-Here we choose Phi(s) = height(s'). NO terminal bonus (it would break PBRS).
+Reward shaping: R'(s, a, s') = -1 + height(s') + 100 if terminal.
+This is NOT potential-based (cf. Ng et al. 1999), so policy invariance is not
+guaranteed. See ppo_pbrs_kaggle.py for the conforming variant.
 """
 # Kaggle dependencies
 !pip install -q gymnasium pygame
@@ -143,33 +141,20 @@ class TripleAcrobotEnv(Env):
         return yout[-1][:6]
 
 
-class TripleAcrobotPBRSWrapper(gym.Wrapper):
-    """Potential-based reward shaping: F(s, a, s') = gamma * Phi(s') - Phi(s).
-
-    Phi(s) = height(s) = -cos(theta_1) - cos(theta_1 + theta_2) - cos(...).
-    GAMMA must match the model's discount factor.
-    """
-
-    GAMMA = 0.99
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self._prev_phi = self._potential(self.unwrapped.state)
-        return obs, info
+class TripleAcrobotRewardWrapper(gym.Wrapper):
+    """Naive dense reward: R' = -1 + height(s') + 100 on success."""
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        phi_next = self._potential(self.unwrapped.state)
-        F = self.GAMMA * phi_next - self._prev_phi
-        self._prev_phi = phi_next
-        return obs, reward + F, terminated, truncated, info
-
-    @staticmethod
-    def _potential(s):
-        return -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
+        obs, _, terminated, truncated, info = self.env.step(action)
+        s = self.unwrapped.state
+        height = -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
+        shaped_reward = -1.0 + height
+        if terminated:
+            shaped_reward += 100.0
+        return obs, shaped_reward, terminated, truncated, info
 
 
-RUN_NAME = "ppo_pbrs"
+RUN_NAME = "ppo_shaped"
 WORK = "/kaggle/working"
 os.makedirs(f"{WORK}/models", exist_ok=True)
 os.makedirs(f"{WORK}/logs", exist_ok=True)
@@ -178,7 +163,7 @@ os.makedirs(f"{WORK}/tensorboard_logs", exist_ok=True)
 
 def make_env():
     env = TripleAcrobotEnv(render_mode=None)
-    env = TripleAcrobotPBRSWrapper(env)
+    env = TripleAcrobotRewardWrapper(env)
     env = TimeLimit(env, max_episode_steps=1000)
     return env
 
@@ -201,20 +186,20 @@ model = PPO(
     n_steps=2048,
     batch_size=256,
     n_epochs=10,
-    gamma=0.99,  # must match TripleAcrobotPBRSWrapper.GAMMA
+    gamma=0.99,
     verbose=1,
     tensorboard_log=f"{WORK}/tensorboard_logs/",
     device="cuda",
 )
 
-print("Starting PPO training (PBRS-conforming reward shaping)...")
+print("Starting PPO training (shaped reward)...")
 model.learn(
     total_timesteps=1_000_000,
     callback=eval_callback,
-    tb_log_name="PPO_PBRS_TripleAcrobot",
+    tb_log_name="PPO_Shaped_TripleAcrobot",
 )
 print("Done.")
-model.save(f"{WORK}/models/ppo_pbrs_triple_acrobot_final")
+model.save(f"{WORK}/models/ppo_shaped_triple_acrobot_final")
 
 
 zip_path = f"{WORK}/{RUN_NAME}_artifacts.zip"

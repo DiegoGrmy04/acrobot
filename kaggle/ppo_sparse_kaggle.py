@@ -1,26 +1,27 @@
-# ==========================================
-# 0. INSTALLATION DES DÉPENDANCES (Crucial sur Kaggle)
-# ==========================================
+"""PPO on the Triple Acrobot, sparse reward — Kaggle GPU notebook.
+
+Self-contained: paste in a Kaggle notebook, set Accelerator = GPU T4 x2,
+choose Internet = ON and Persistence = Files only, then Save & Run All.
+
+Hyperparameters follow Schulman et al. 2017 (the PPO paper).
+"""
+# Kaggle dependencies
 !pip install -q gymnasium pygame
 !pip install -q "stable-baselines3[extra]" tensorboard
 
-# ==========================================
-# 1. IMPORTS
-# ==========================================
 import os
+import zipfile
+
 import numpy as np
-from numpy import cos, pi, sin
-import gymnasium as gym
 from gymnasium import Env, spaces
 from gymnasium.wrappers import TimeLimit
+from numpy import cos, pi, sin
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.callbacks import EvalCallback
 
-# ==========================================
-# 2. DÉFINITION DE L'ENVIRONNEMENT DE BASE
-# ==========================================
+
 class TripleAcrobotEnv(Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 15}
     dt = 0.05
@@ -31,15 +32,17 @@ class TripleAcrobotEnv(Env):
     MAX_VEL_1, MAX_VEL_2, MAX_VEL_3 = 4 * pi, 9 * pi, 15 * pi
     AVAIL_TORQUE = [-2.0, 0.0, +2.0]
 
-    def __init__(self, render_mode: str | None = None):
+    def __init__(self, render_mode=None):
         self.render_mode = render_mode
-        self.screen, self.clock = None, None
-        high = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, self.MAX_VEL_1, self.MAX_VEL_2, self.MAX_VEL_3], dtype=np.float32)
+        high = np.array(
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, self.MAX_VEL_1, self.MAX_VEL_2, self.MAX_VEL_3],
+            dtype=np.float32,
+        )
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float32)
         self.action_space = spaces.Discrete(3)
         self.state = None
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self.state = self.np_random.uniform(low=-0.1, high=0.1, size=(6,)).astype(np.float32)
         return self._get_ob(), {}
@@ -49,18 +52,22 @@ class TripleAcrobotEnv(Env):
         torque = self.AVAIL_TORQUE[a]
         s_augmented = np.append(s, torque)
         ns = self.rk4(self._dsdt, s_augmented, [0, self.dt])
-        
+
         def wrap(x, m, M):
             diff = M - m
-            while x > M: x -= diff
-            while x < m: x += diff
+            while x > M:
+                x -= diff
+            while x < m:
+                x += diff
             return x
 
-        ns[0], ns[1], ns[2] = wrap(ns[0], -pi, pi), wrap(ns[1], -pi, pi), wrap(ns[2], -pi, pi)
+        ns[0] = wrap(ns[0], -pi, pi)
+        ns[1] = wrap(ns[1], -pi, pi)
+        ns[2] = wrap(ns[2], -pi, pi)
         ns[3] = np.clip(ns[3], -self.MAX_VEL_1, self.MAX_VEL_1)
         ns[4] = np.clip(ns[4], -self.MAX_VEL_2, self.MAX_VEL_2)
         ns[5] = np.clip(ns[5], -self.MAX_VEL_3, self.MAX_VEL_3)
-        
+
         self.state = ns
         terminated = self._terminal()
         reward = -1.0 if not terminated else 0.0
@@ -68,12 +75,15 @@ class TripleAcrobotEnv(Env):
 
     def _get_ob(self):
         s = self.state
-        return np.array([cos(s[0]), sin(s[0]), cos(s[1]), sin(s[1]), cos(s[2]), sin(s[2]), s[3], s[4], s[5]], dtype=np.float32)
+        return np.array(
+            [cos(s[0]), sin(s[0]), cos(s[1]), sin(s[1]), cos(s[2]), sin(s[2]), s[3], s[4], s[5]],
+            dtype=np.float32,
+        )
 
     def _terminal(self):
         s = self.state
-        hauteur = -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
-        return bool(hauteur > 2.0)
+        height = -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
+        return bool(height > 2.0)
 
     def _dsdt(self, s_augmented):
         g = 9.81
@@ -87,28 +97,30 @@ class TripleAcrobotEnv(Env):
         dt1, dt2, dt3 = s[3], s[4], s[5]
         a1, a2, a3 = t1, t1 + t2, t1 + t2 + t3
         da1, da2, da3 = dt1, dt1 + dt2, dt1 + dt2 + dt3
-        
-        M11 = m1*lc1**2 + m2*l1**2 + m3*l1**2 + I1
-        M22 = m2*lc2**2 + m3*l2**2 + I2
-        M33 = m3*lc3**2 + I3
-        c12, c13, c23 = (m2*l1*lc2 + m3*l1*l2), (m3*l1*lc3), (m3*l2*lc3)
-        M12, M13, M23 = c12 * cos(a1 - a2), c13 * cos(a1 - a3), c23 * cos(a2 - a3)
-        
+
+        M11 = m1 * lc1**2 + m2 * l1**2 + m3 * l1**2 + I1
+        M22 = m2 * lc2**2 + m3 * l2**2 + I2
+        M33 = m3 * lc3**2 + I3
+        c12 = m2 * l1 * lc2 + m3 * l1 * l2
+        c13 = m3 * l1 * lc3
+        c23 = m3 * l2 * lc3
+        M12 = c12 * cos(a1 - a2)
+        M13 = c13 * cos(a1 - a3)
+        M23 = c23 * cos(a2 - a3)
+
         M = np.array([[M11, M12, M13], [M12, M22, M23], [M13, M23, M33]])
         V1 = c12 * sin(a1 - a2) * da2**2 + c13 * sin(a1 - a3) * da3**2
         V2 = -c12 * sin(a1 - a2) * da1**2 + c23 * sin(a2 - a3) * da3**2
         V3 = -c13 * sin(a1 - a3) * da1**2 - c23 * sin(a2 - a3) * da2**2
         V = np.array([V1, V2, V3])
-        
-        G1 = (m1*lc1 + m2*l1 + m3*l1) * g * sin(a1)
-        G2 = (m2*lc2 + m3*l2) * g * sin(a2)
-        G3 = (m3*lc3) * g * sin(a3)
+
+        G1 = (m1 * lc1 + m2 * l1 + m3 * l1) * g * sin(a1)
+        G2 = (m2 * lc2 + m3 * l2) * g * sin(a2)
+        G3 = (m3 * lc3) * g * sin(a3)
         G = np.array([G1, G2, G3])
-        
-        Tau_abs = np.array([-a, a, 0.0])
-        RHS = Tau_abs - V - G
-        dd_a = np.linalg.solve(M, RHS)
-        
+
+        Tau = np.array([-a, a, 0.0])
+        dd_a = np.linalg.solve(M, Tau - V - G)
         return dt1, dt2, dt3, dd_a[0], dd_a[1] - dd_a[0], dd_a[2] - dd_a[1], 0.0
 
     def rk4(self, derivs, y0, t):
@@ -125,55 +137,32 @@ class TripleAcrobotEnv(Env):
             yout[i + 1] = y0 + dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
         return yout[-1][:6]
 
-# ==========================================
-# 3. LE WRAPPER "REWARD SHAPING"
-# ==========================================
-class TripleAcrobotRewardWrapper(gym.Wrapper):
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        s = self.unwrapped.state
-        hauteur = -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
-        
-        shaped_reward = -1.0 + hauteur
-        
-        if terminated:
-            shaped_reward += 100.0
-            
-        return obs, shaped_reward, terminated, truncated, info
 
-# ==========================================
-# 4. SCRIPT D'ENTRAÎNEMENT (PPO)
-# ==========================================
-# Chemins absolus vers /kaggle/working/ pour garantir la persistance dans l'Output Kaggle.
 RUN_NAME = "ppo_sparse"
 WORK = "/kaggle/working"
 os.makedirs(f"{WORK}/models", exist_ok=True)
 os.makedirs(f"{WORK}/logs", exist_ok=True)
 os.makedirs(f"{WORK}/tensorboard_logs", exist_ok=True)
 
+
 def make_env():
-    # Variante "sparse" : PAS de reward shaping. Le PPO doit converger
-    # uniquement avec le signal -1 par step et 0 sur succès. Permet d'isoler
-    # la contribution de l'algorithme PPO indépendamment du shaping.
+    """Sparse reward only (-1 per step, 0 on success). No reward shaping."""
     env = TripleAcrobotEnv(render_mode=None)
     env = TimeLimit(env, max_episode_steps=1000)
     return env
 
-# Vectorisation sur 4 processeurs pour saturer Kaggle
-vec_env = make_vec_env(make_env, n_envs=4, vec_env_cls=SubprocVecEnv)
 
+vec_env = make_vec_env(make_env, n_envs=4, vec_env_cls=SubprocVecEnv)
 eval_env = make_env()
 eval_callback = EvalCallback(
     eval_env,
-    best_model_save_path=f'{WORK}/models/',
-    log_path=f'{WORK}/logs/',
+    best_model_save_path=f"{WORK}/models/",
+    log_path=f"{WORK}/logs/",
     eval_freq=10000,
     deterministic=True,
-    render=False
+    render=False,
 )
 
-# Configuration PPO
 model = PPO(
     "MlpPolicy",
     vec_env,
@@ -184,19 +173,19 @@ model = PPO(
     gamma=0.99,
     verbose=1,
     tensorboard_log=f"{WORK}/tensorboard_logs/",
-    device="cuda" # On s'assure d'utiliser le GPU
+    device="cuda",
 )
 
-print("Début de l'apprentissage PPO (variante SPARSE, sans reward shaping)...")
-model.learn(total_timesteps=1000000, callback=eval_callback, tb_log_name="PPO_Sparse_TripleAcrobot")
-print("Entraînement terminé !")
-
+print("Starting PPO training (sparse reward)...")
+model.learn(
+    total_timesteps=1_000_000,
+    callback=eval_callback,
+    tb_log_name="PPO_Sparse_TripleAcrobot",
+)
+print("Done.")
 model.save(f"{WORK}/models/ppo_sparse_triple_acrobot_final")
 
-# ==========================================
-# 5. PACKAGING DES OUTPUTS (zip unique pour téléchargement)
-# ==========================================
-import zipfile
+
 zip_path = f"{WORK}/{RUN_NAME}_artifacts.zip"
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     for sub in ["models", "logs", "tensorboard_logs"]:
@@ -208,10 +197,10 @@ with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 full = os.path.join(root, f)
                 zf.write(full, arcname=os.path.relpath(full, WORK))
 
-print("\n=== Contenu de /kaggle/working/ ===")
-for root, dirs, files in os.walk(WORK):
+print("\nContents of /kaggle/working/:")
+for root, _, files in os.walk(WORK):
     for f in files:
         path = os.path.join(root, f)
         size_kb = os.path.getsize(path) / 1024
         print(f"  {size_kb:8.1f} KB  {path}")
-print(f"\nTéléchargez : {zip_path}")
+print(f"\nDownload: {zip_path}")

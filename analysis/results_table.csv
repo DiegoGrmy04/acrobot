@@ -1,0 +1,7 @@
+run,algo,reward,n_episodes,ep_len_mean,ep_len_std,success_rate
+dqn_sparse,DQN,sparse,100,539.78,116.64043724197882,1.0
+dqn_shaped,DQN,shaped,100,437.02,116.4383081292407,1.0
+ppo_sparse,PPO,sparse,100,402.09,97.23045767659433,1.0
+ppo_shaped,PPO,shaped,100,395.56,119.8652843820929,1.0
+ppo_pbrs,PPO,PBRS,100,377.71,88.37831125338387,0.99
+reinforce_shaped,REINFORCE,shaped,100,951.07,168.35274010244086,0.08

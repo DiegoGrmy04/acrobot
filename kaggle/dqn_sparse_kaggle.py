@@ -1,13 +1,7 @@
-"""PPO + Potential-Based Reward Shaping on the Triple Acrobot — Kaggle GPU notebook.
+"""DQN on the Triple Acrobot, sparse reward — Kaggle GPU notebook.
 
 Self-contained: paste in a Kaggle notebook, set Accelerator = GPU T4 x2,
 choose Internet = ON and Persistence = Files only, then Save & Run All.
-
-Reference: Ng, Harada & Russell (1999), "Policy Invariance Under Reward
-Transformations", ICML. Theorem: if F(s, a, s') = gamma * Phi(s') - Phi(s),
-the optimal policy is invariant w.r.t. the original MDP.
-
-Here we choose Phi(s) = height(s'). NO terminal bonus (it would break PBRS).
 """
 # Kaggle dependencies
 !pip install -q gymnasium pygame
@@ -21,12 +15,14 @@ import numpy as np
 from gymnasium import Env, spaces
 from gymnasium.wrappers import TimeLimit
 from numpy import cos, pi, sin
-from stable_baselines3 import PPO
+from stable_baselines3 import DQN
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 
+# Triple Acrobot environment (3-link version of Gym's Acrobot-v1).
+# Inlined so the Kaggle notebook is fully self-contained.
 class TripleAcrobotEnv(Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 15}
     dt = 0.05
@@ -143,33 +139,7 @@ class TripleAcrobotEnv(Env):
         return yout[-1][:6]
 
 
-class TripleAcrobotPBRSWrapper(gym.Wrapper):
-    """Potential-based reward shaping: F(s, a, s') = gamma * Phi(s') - Phi(s).
-
-    Phi(s) = height(s) = -cos(theta_1) - cos(theta_1 + theta_2) - cos(...).
-    GAMMA must match the model's discount factor.
-    """
-
-    GAMMA = 0.99
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self._prev_phi = self._potential(self.unwrapped.state)
-        return obs, info
-
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        phi_next = self._potential(self.unwrapped.state)
-        F = self.GAMMA * phi_next - self._prev_phi
-        self._prev_phi = phi_next
-        return obs, reward + F, terminated, truncated, info
-
-    @staticmethod
-    def _potential(s):
-        return -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
-
-
-RUN_NAME = "ppo_pbrs"
+RUN_NAME = "dqn_sparse"
 WORK = "/kaggle/working"
 os.makedirs(f"{WORK}/models", exist_ok=True)
 os.makedirs(f"{WORK}/logs", exist_ok=True)
@@ -177,8 +147,8 @@ os.makedirs(f"{WORK}/tensorboard_logs", exist_ok=True)
 
 
 def make_env():
+    """Sparse reward only (-1 per step, 0 on success). No reward shaping."""
     env = TripleAcrobotEnv(render_mode=None)
-    env = TripleAcrobotPBRSWrapper(env)
     env = TimeLimit(env, max_episode_steps=1000)
     return env
 
@@ -194,29 +164,33 @@ eval_callback = EvalCallback(
     render=False,
 )
 
-model = PPO(
+# Hyperparameters: SB3 defaults for DQN (Mnih et al. 2015 spirit).
+model = DQN(
     "MlpPolicy",
     vec_env,
-    learning_rate=3e-4,
-    n_steps=2048,
-    batch_size=256,
-    n_epochs=10,
-    gamma=0.99,  # must match TripleAcrobotPBRSWrapper.GAMMA
+    learning_rate=1e-3,
+    buffer_size=100_000,
+    learning_starts=1000,
+    batch_size=128,
+    exploration_fraction=0.5,
+    exploration_initial_eps=1.0,
+    exploration_final_eps=0.05,
     verbose=1,
     tensorboard_log=f"{WORK}/tensorboard_logs/",
     device="cuda",
 )
 
-print("Starting PPO training (PBRS-conforming reward shaping)...")
+print("Starting DQN training (sparse reward)...")
 model.learn(
     total_timesteps=1_000_000,
     callback=eval_callback,
-    tb_log_name="PPO_PBRS_TripleAcrobot",
+    tb_log_name="DQN_Sparse_TripleAcrobot",
 )
 print("Done.")
-model.save(f"{WORK}/models/ppo_pbrs_triple_acrobot_final")
+model.save(f"{WORK}/models/dqn_sparse_triple_acrobot_final")
 
 
+# Package everything into a single zip for download.
 zip_path = f"{WORK}/{RUN_NAME}_artifacts.zip"
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     for sub in ["models", "logs", "tensorboard_logs"]:
