@@ -1,88 +1,79 @@
 """
 Script de test universel pour le Triple Acrobot.
-Permet de visualiser et comparer facilement les modèles entraînés (DQN et PPO).
+Permet de visualiser et comparer facilement les modèles entraînés (DQN, PPO, REINFORCE).
 """
 
 import time
-import os
-# On importe les deux algorithmes
-from stable_baselines3 import PPO, DQN
-from stable_baselines3.common.vec_env import DummyVecEnv
+
+import torch
 from gymnasium.wrappers import TimeLimit
+from stable_baselines3 import DQN, PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
 
-# Importation de l'environnement depuis votre fichier local
-from triple_acrobot import TripleAcrobotEnv 
+from reinforce_policy import PolicyNetwork
+from triple_acrobot import TripleAcrobotEnv
 
-# ==========================================
-# 1. PRÉPARATION DE L'ENVIRONNEMENT
-# ==========================================
+
 def make_env():
     env = TripleAcrobotEnv(render_mode="human")
     env = TimeLimit(env, max_episode_steps=1000)
     return env
 
+
+print("\n" + "=" * 50)
+print("🕹️  SIMULATEUR TRIPLE ACROBOT  🕹️")
+print("=" * 50)
+print("Quel modèle souhaitez-vous tester ?")
+print("1. DQN       (Deep Q-Network — baseline / échec)")
+print("2. PPO       (Proximal Policy Optimization — succès avec reward shaping)")
+print("3. REINFORCE (Policy gradient Monte-Carlo — Williams 1992)")
+choix = input("Entrez 1, 2 ou 3 : ")
+
 vec_env = DummyVecEnv([make_env])
 
-# ==========================================
-# 2. MENU INTERACTIF (Choix du modèle)
-# ==========================================
-print("\n" + "="*50)
-print("🕹️  SIMULATEUR TRIPLE ACROBOT  🕹️")
-print("="*50)
-print("Quel modèle souhaitez-vous tester ?")
-print("1. DQN (Deep Q-Network - Modèle de base / Échec)")
-print("2. PPO (Proximal Policy Optimization - Succès avec Reward Shaping)")
-choix = input("Entrez 1 ou 2 : ")
-
-# ==========================================
-# 3. CHARGEMENT DYNAMIQUE
-# ==========================================
 if choix == "1":
-    chemin_fichier = "models/best_modelDQN"
-    print(f"\n🧠 Chargement du cerveau DQN depuis '{chemin_fichier}'...")
-    try:
-        model = DQN.load(chemin_fichier)
-    except FileNotFoundError:
-        print(f"❌ Erreur : Le fichier {chemin_fichier}.zip est introuvable.")
-        exit()
+    chemin = "models/best_modelDQN"
+    print(f"\n🧠 Chargement DQN depuis '{chemin}'...")
+    model = DQN.load(chemin)
+    obs = vec_env.reset()
+    predict = lambda obs: model.predict(obs, deterministic=True)[0]
 
 elif choix == "2":
-    chemin_fichier = "models/best_modelPPO"
-    print(f"\n🧠 Chargement du cerveau PPO depuis '{chemin_fichier}'...")
-    try:
-        model = PPO.load(chemin_fichier)
-    except FileNotFoundError:
-        print(f"❌ Erreur : Le fichier {chemin_fichier}.zip est introuvable.")
-        exit()
+    chemin = "models/best_modelPPO"
+    print(f"\n🧠 Chargement PPO depuis '{chemin}'...")
+    model = PPO.load(chemin)
+    obs = vec_env.reset()
+    predict = lambda obs: model.predict(obs, deterministic=True)[0]
+
+elif choix == "3":
+    chemin = "models/best_modelREINFORCE.pt"
+    print(f"\n🧠 Chargement REINFORCE depuis '{chemin}'...")
+    ckpt = torch.load(chemin, map_location="cpu")
+    hidden = ckpt.get("hyper", {}).get("hidden", 64)
+    policy = PolicyNetwork(obs_dim=9, n_actions=3, hidden=hidden)
+    policy.load_state_dict(ckpt["state_dict"])
+    policy.eval()
+    obs = vec_env.reset()
+
+    def predict(obs):
+        obs_t = torch.as_tensor(obs[0], dtype=torch.float32)
+        return [policy.predict(obs_t, deterministic=True)]
+
 else:
     print("❌ Choix invalide. Veuillez relancer le script.")
-    exit()
+    raise SystemExit(1)
 
-# ==========================================
-# 4. BOUCLE DE SIMULATION
-# ==========================================
-obs = vec_env.reset()
-print("\n▶️  Démarrage de l'animation ! Observez la technique de l'agent...\n")
-
-# On laisse tourner la simulation pour 3000 étapes maximum
+print("\n▶️  Démarrage de l'animation...\n")
 for i in range(3000):
-    # L'agent prédit l'action optimale de manière déterministe
-    action, _states = model.predict(obs, deterministic=True)
-    
-    # On applique l'action
+    action = predict(obs)
     obs, reward, done, info = vec_env.step(action)
-    
-    # Pause pour la fluidité visuelle
-    time.sleep(0.02) 
-    
-    # Si le bout du 3ème segment dépasse la ligne ou si le temps est écoulé
-    if done:
-        if choix == "2":
-            print("🏆 Épisode terminé (L'agent PPO a probablement réussi !) Réinitialisation...")
+    time.sleep(0.02)
+    if done[0]:
+        if choix == "1":
+            print("⏱️ Épisode terminé (DQN — probablement timeout).")
         else:
-            print("⏱️ Épisode terminé (L'agent DQN a probablement atteint la limite de temps). Réinitialisation...")
-            
-        time.sleep(1.5) # Pause pour observer la position finale
+            print("🏆 Épisode terminé (objectif probablement atteint).")
+        time.sleep(1.5)
 
 vec_env.close()
 print("Fin de la simulation.")

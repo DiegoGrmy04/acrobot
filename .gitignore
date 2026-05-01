@@ -1,0 +1,49 @@
+# ============================================================
+# Claude Code — tout ce qui est lié à Claude reste local
+# ============================================================
+CLAUDE.md
+claude_notes/
+.claude/
+.claude*/
+*.claude.md
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+ENV/
+
+# ============================================================
+# Notebooks / outils
+# ============================================================
+.ipynb_checkpoints/
+
+# ============================================================
+# IDE / OS
+# ============================================================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Artefacts d'entraînement RL (à garder hors du repo si lourd)
+# Décommenter si on ne veut pas push les modèles / logs.
+# ============================================================
+# models/
+# logs/
+# tensorboard_logs/

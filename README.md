@@ -33,10 +33,11 @@ Le Triple Acrobot est un Processus de Décision Markovien (MDP) modélisant un p
 ---
 
 ## 3. Démarche Scientifique et Algorithmes
-Pour résoudre cet environnement, nous avons mené deux expérimentations majeures en utilisant la librairie `stable-baselines3`. Les entraînements ont été réalisés en vectorisant 4 environnements en parallèle (`SubprocVecEnv`) pour maximiser l'efficacité d'échantillonnage.
+Pour résoudre cet environnement, nous avons mené trois expérimentations qui couvrent les grandes familles du RL profond moderne. DQN et PPO utilisent la librairie `stable-baselines3` (vectorisation 4 envs en parallèle via `SubprocVecEnv`) ; REINFORCE est implémenté à la main en PyTorch (~150 lignes) pour démontrer la dérivation directe du *Policy Gradient Theorem*.
 
-1. **La Baseline (DQN) :** Utilisation d'un Deep Q-Network classique avec une politique d'exploration $\epsilon$-greedy.
-2. **L'Approche Avancée (PPO + Reward Shaping) :** Utilisation de l'algorithme on-policy *Proximal Policy Optimization* combiné à un `Wrapper` d'environnement modifiant la fonction de récompense.
+1. **Baseline value-based (DQN) :** Deep Q-Network avec exploration $\epsilon$-greedy.
+2. **Policy gradient pur (REINFORCE + Reward Shaping) :** Méthode Monte-Carlo de Williams (1992), sans critic ni clipping. Sert de *chaînon manquant* entre DQN et PPO et isole la contribution propre de l'actor-critic.
+3. **Actor-critic moderne (PPO + Reward Shaping) :** *Proximal Policy Optimization* (Schulman et al. 2017) couplé à un wrapper de reward shaping.
 
 ---
 
@@ -57,7 +58,15 @@ Nous avons créé un `Gym Wrapper` qui modifie la récompense à chaque étape :
 $$R'(s) = -1.0 + \text{Hauteur\_du\_segment\_3}(s)$$
 Au lieu de chercher la victoire finale au hasard, l'agent reçoit un **signal dense**. S'il fait monter le pendule, il est moins pénalisé. S'il atteint la cible, il gagne un bonus massif (+100).
 
-### C. Le Succès du PPO
+### C. Le Chaînon Manquant : REINFORCE
+
+Pour isoler l'apport spécifique du *critic* de PPO (et non simplement celui du reward shaping), nous avons implémenté **REINFORCE** — l'algorithme Monte-Carlo policy gradient originel (Williams, 1992) — *avec le même reward shaping* et *la même architecture réseau* que PPO. La seule différence : l'estimateur de gradient.
+
+$$\nabla_\theta J(\theta) \approx \mathbb{E}\left[\sum_t \big(G_t - b\big)\,\nabla_\theta \log \pi_\theta(a_t \mid s_t)\right]$$
+
+où $b$ est la moyenne des retours du batch (baseline pour réduire la variance, cf. Sutton & Barto §13.4). Sans critic apprenant $V_\phi(s)$, le retour Monte-Carlo $G_t$ a une variance élevée et la convergence est plus lente et plus bruitée que PPO.
+
+### D. Le Succès du PPO
 Couplé à ce *Reward Shaping*, nous avons entraîné un agent PPO (Proximal Policy Optimization). PPO, en tant que méthode d'optimisation de politique (Actor-Critic), gère beaucoup mieux les dynamiques physiques continues que les méthodes basées sur la valeur (Q-Learning).
 
 **Résultats obtenus :**
@@ -73,17 +82,22 @@ Couplé à ce *Reward Shaping*, nous avons entraîné un agent PPO (Proximal Pol
 projet2/
 │
 ├── triple_acrobot.py       # Le cœur physique (Résolution Lagrangienne, Wrapper de récompense)
-├── train_agent.py          # Script d'entraînement optimisé pour Kaggle/GPU (j'ai pas utilisé au final pcq trop long et donc j'ai mis sur kaggle)
-├── enjoy_agent.py          # Script interactif pour visionner les parties
+├── reinforce_policy.py     # Policy network PyTorch + utilitaire compute_returns (REINFORCE)
+├── train_agent.py          # Script d'entraînement DQN local (ancienne version, peu utilisé)
+├── train_reinforce.py      # Entraînement REINFORCE local (sanity check / runs courts)
+├── enjoy_agent.py          # Script interactif pour visionner les parties (DQN/PPO/REINFORCE)
 │
-├── models/                 # Modèles sérialisés
-│   ├── best_modelDQN.zip   # "Cerveau" ayant échoué (Preuve empirique n°1)
-│   └── best_modelPPO.zip   # "Cerveau" victorieux (Preuve empirique n°2)
+├── models/                       # Modèles sérialisés
+│   ├── best_modelDQN.zip         # Échec value-based (preuve empirique n°1)
+│   ├── best_modelREINFORCE.pt    # Policy gradient pur (preuve empirique n°2)
+│   └── best_modelPPO.zip         # Actor-critic moderne (preuve empirique n°3)
 │
-└── tensorboard_logs/       # Historique des métriques (Loss, Rewards, Episodes length) pas mis a jour
-├── kaggle/                 # Script lancé sur kaggle pour trouver les modèles
-│   ├── dqn_kaggle.py   # Script ayant échoué (Preuve empirique n°1)
-│   └── ppo_kaggle.py   # Script victorieux (Preuve empirique n°2)
+├── kaggle/                    # Scripts auto-suffisants à lancer sur Kaggle GPU
+│   ├── dqn_kaggle.py          # DQN (échec)
+│   ├── reinforce_kaggle.py    # REINFORCE Monte-Carlo (chaînon manquant)
+│   └── ppo_kaggle.py          # PPO + reward shaping (succès)
+│
+└── tensorboard_logs/       # Historique des métriques (rewards, episode length, gradients...)
 
 ```
 ---
@@ -92,5 +106,6 @@ projet2/
 
 ```text
 pip install gymnasium pygame
-pip install "stable-baselines3[extra]" tensorboard# acrobot
+pip install "stable-baselines3[extra]" tensorboard
+pip install torch  # requis pour REINFORCE
 ```
