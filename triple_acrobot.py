@@ -20,7 +20,7 @@ class TripleAcrobotEnv(Env):
         "render_fps": 15,
     }
 
-    dt = 0.05  # Pas de temps réduit car la physique à 3 segments est plus chaotique
+    dt = 0.05  # Pas de temps réduit pour + de précision
 
     # Paramètres physiques des 3 segments
     LINK_LENGTH_1 = 1.0  # [m]
@@ -39,12 +39,12 @@ class TripleAcrobotEnv(Env):
 
     MAX_VEL_1 = 4 * pi
     MAX_VEL_2 = 9 * pi
-    MAX_VEL_3 = 15 * pi  # Le dernier segment peut tourner très vite
+    MAX_VEL_3 = 15 * pi
 
-    AVAIL_TORQUE = [-2.0, 0.0, +2.0] # Couples légèrement augmentés pour compenser le poids supplémentaire
+    AVAIL_TORQUE = [-2.0, 0.0, +2.0] # augmenter pour compenser le poids supplémentaire du 3e segment
 
     torque_noise_max = 0.0
-    SCREEN_DIM = 600     # Fenêtre agrandie pour accommoder le 3ème lien
+    SCREEN_DIM = 600
 
     def __init__(self, render_mode: str | None = None):
         self.render_mode = render_mode
@@ -52,11 +52,9 @@ class TripleAcrobotEnv(Env):
         self.clock = None
         self.isopen = True
         
-        # L'espace d'observation a maintenant 9 dimensions : 
+        # L'espace d'observation (mtn à 9 dimensions) : 
         # cos(t1), sin(t1), cos(t2), sin(t2), cos(t3), sin(t3), v1, v2, v3
-        high = np.array(
-            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, self.MAX_VEL_1, self.MAX_VEL_2, self.MAX_VEL_3], dtype=np.float32
-        )
+        high = np.array( [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, self.MAX_VEL_1, self.MAX_VEL_2, self.MAX_VEL_3], dtype=np.float32)
         low = -high
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
         self.action_space = spaces.Discrete(3)
@@ -107,9 +105,9 @@ class TripleAcrobotEnv(Env):
         )
 
     def _terminal(self):
+        # calcul de la hauteur de l'extrémité du 3e segment
+        # objectif est atteindre une hauteur > 2.0 (maximum théorique de 3.0)
         s = self.state
-        # Calcul de la hauteur de l'extrémité du 3ème segment (0 = bas, > 0 = haut)
-        # Objectif : Hauteur > 2.0 (sur un maximum théorique de 3.0)
         hauteur = -cos(s[0]) - cos(s[1] + s[0]) - cos(s[2] + s[1] + s[0])
         return bool(hauteur > 2.0)
 
@@ -124,7 +122,7 @@ class TripleAcrobotEnv(Env):
         lc1, lc2, lc3 = self.LINK_COM_POS_1, self.LINK_COM_POS_2, self.LINK_COM_POS_3
         I1, I2, I3 = self.LINK_MOI, self.LINK_MOI, self.LINK_MOI
         
-        a = s_augmented[-1]  # Action (Torque appliqué entre lien 1 et 2)
+        a = s_augmented[-1]
         s = s_augmented[:-1]
         
         # Angles relatifs
